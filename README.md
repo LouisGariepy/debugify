@@ -173,4 +173,7 @@ let foo_2_debug = format!("{:?}", foo_2);
 assert_eq!(foo_2_debug, "Baz { biz: foo456, qux: qux\"world\", quant: 789 }");
 ```
 
-Tuple and unit variants are essentially ignored by `debugify`. They will be debug-printed as they normally would.
+## Tuple and unit structs and variants
+Tuple structs and variants also support field format attributes. Of course, these don't interact at all with the field name rules.
+
+Unit structs and variants are formatted as normal.
