@@ -25,7 +25,7 @@
 
 # debugify
 
-Derive macro for `std::fmt::Debug` focused on reducing boilerplate Supports both format strings and formatter functions.
+Derive macro for `std::fmt::Debug` focused on reducing boilerplate.Supports both format strings and formatter functions.
 
 ## Formats
 
