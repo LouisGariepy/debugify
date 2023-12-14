@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{
     parse::{Parse, ParseStream},
-    ConstParam, GenericParam, LifetimeParam, TypeParam,
+    ConstParam, Fields, GenericParam, LifetimeParam, TypeParam,
 };
 
 /// # debugify
@@ -178,7 +178,7 @@ fn debugify_enum(item: syn::ItemEnum) -> TokenStream {
     let rules = aggregate_format_rules(&item.attrs);
 
     // Early-return if there was an error while parsing the item attributes
-    let (field_name, field_type) = match rules {
+    let (field_name_rules, field_type_rules) = match rules {
         Ok(rules) => rules,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -192,61 +192,13 @@ fn debugify_enum(item: syn::ItemEnum) -> TokenStream {
         .variants
         .into_iter()
         .map(|variant| {
-            let variant_ident = variant.ident;
-            Ok(match variant.fields {
-                syn::Fields::Named(_) => {
-                    let field_names = variant
-                        .fields
-                        .iter()
-                        .map(|field| field.ident.as_ref().unwrap())
-                        .collect::<Vec<_>>();
-                    let fields =
-                        field_attributes(&variant.fields, &field_name, &field_type, false)?;
-                    quote! {
-                        #item_ident::#variant_ident { #(#field_names),* } => {
-                            f.debug_struct(
-                                stringify!(#variant_ident)
-                            )
-                            #(#fields)*
-                            .finish()
-                        }
-                    }
-                }
-                syn::Fields::Unnamed(_) => {
-                    let field_names = variant
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .map(|(field_nb, _)| quote::format_ident!("field_{field_nb}"))
-                        .collect::<Vec<_>>();
-                    let fields = field_names.iter().map(|field_name| {
-                        quote! {
-                            .field(
-                                #field_name
-                            )
-                        }
-                    });
-                    quote! {
-                        #item_ident::#variant_ident ( #(#field_names),* ) => {
-                            f.debug_tuple(
-                                stringify!(#variant_ident)
-                            )
-                            #(#fields)*
-                            .finish()
-                        }
-                    }
-                }
-                syn::Fields::Unit => {
-                    quote! {
-                        #item_ident::#variant_ident => {
-                            f.debug_struct(
-                                stringify!(#variant_ident)
-                            )
-                            .finish()
-                        }
-                    }
-                }
-            })
+            fmt_impl_fragment(
+                &variant.fields,
+                &variant.ident,
+                &field_name_rules,
+                &field_type_rules,
+                false,
+            )
         })
         .collect::<syn::Result<Vec<_>>>();
 
@@ -276,7 +228,7 @@ fn debugify_struct(item: syn::ItemStruct) -> TokenStream {
     let rules = aggregate_format_rules(&item.attrs);
 
     // Early-return if there was an error parsing the item attributes
-    let (field_name, field_type) = match rules {
+    let (field_name_rules, field_type_rules) = match rules {
         Ok(rules) => rules,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -285,93 +237,108 @@ fn debugify_struct(item: syn::ItemStruct) -> TokenStream {
     let generics = &item.generics;
     let generic_parameters = generic_params(generics);
 
-    // Parse field attributes
-    let fields = field_attributes(&item.fields, &field_name, &field_type, true);
+    // Generate the debug impl
+    let fmt_impl = fmt_impl_fragment(
+        &item.fields,
+        &item_ident,
+        &field_name_rules,
+        &field_type_rules,
+        true,
+    );
 
     // Early-return if there was an error parsing the field attributes
-    let fields = match fields {
-        Ok(fields) => fields,
+    let fmt_impl = match fmt_impl {
+        Ok(fmt_impl) => fmt_impl,
         Err(e) => return e.to_compile_error().into(),
     };
 
-    // Generate the debug impl
     quote! {
         impl #generics std::fmt::Debug for #item_ident <#(#generic_parameters),*> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct(
-                    stringify!(#item_ident)
-                )
-                #(#fields)*
-                .finish()
+                #fmt_impl
             }
         }
     }
     .into()
 }
 
-pub(crate) struct ItemAttributeMetaItem<T: Parse> {
-    pub(crate) values: ItemAttributeValues<T>,
-    pub(crate) _eq: syn::token::Eq,
-    pub(crate) format: Format,
-}
-
-impl<T: Parse> Parse for ItemAttributeMetaItem<T> {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(Self {
-            values: input.parse()?,
-            _eq: input.parse()?,
-            format: input.parse()?,
-        })
-    }
-}
-
-pub(crate) enum ItemAttributeValues<T: Parse> {
-    Single(ItemAttributeIdentsSingle<T>),
-    Multiple(ItemAttributeIdentsMultiple<T>),
-}
-
-impl<T: Parse> Parse for ItemAttributeValues<T> {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(syn::Ident) {
-            input
-                .parse::<ItemAttributeIdentsSingle<T>>()
-                .map(ItemAttributeValues::Single)
-        } else if lookahead.peek(syn::token::Bracket) {
-            input
-                .parse::<ItemAttributeIdentsMultiple<T>>()
-                .map(ItemAttributeValues::Multiple)
-        } else {
-            Err(lookahead.error())
+fn fmt_impl_fragment(
+    fields: &Fields,
+    item_ident: &syn::Ident,
+    field_name_rules: &HashMap<syn::Ident, Format>,
+    field_type_rules: &HashMap<syn::Type, Format>,
+    is_struct: bool,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let field_idents = fields.iter().enumerate().map(|(field_nb, field)| {
+        field
+            .ident
+            .clone()
+            .unwrap_or_else(|| quote::format_ident!("field_{field_nb}"))
+    });
+    let field_fragments = field_attributes(fields, field_name_rules, field_type_rules)?;
+    Ok(match fields {
+        syn::Fields::Named(_) => {
+            let fragment = quote! {
+                f.debug_struct(
+                    stringify!(#item_ident)
+                )
+                #(#field_fragments)*
+                .finish()
+            };
+            if is_struct {
+                quote! {
+                    let Self { #(#field_idents),* } = self;
+                    #fragment
+                }
+            } else {
+                quote! {
+                    Self::#item_ident { #(#field_idents),* } => {
+                        #fragment
+                    }
+                }
+            }
         }
-    }
-}
-
-pub(crate) struct ItemAttributeIdentsSingle<T: Parse> {
-    pub(crate) value: T,
-}
-
-impl<T: Parse> Parse for ItemAttributeIdentsSingle<T> {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(Self {
-            value: input.parse()?,
-        })
-    }
-}
-
-pub(crate) struct ItemAttributeIdentsMultiple<T: Parse> {
-    pub(crate) _bracket: syn::token::Bracket,
-    pub(crate) values: syn::punctuated::Punctuated<T, syn::Token![,]>,
-}
-
-impl<T: Parse> Parse for ItemAttributeIdentsMultiple<T> {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        Ok(Self {
-            _bracket: syn::bracketed!(content in input),
-            values: content.parse_terminated(T::parse, syn::Token![,])?,
-        })
-    }
+        syn::Fields::Unnamed(_) => {
+            let fragment = quote! {
+                f.debug_tuple(
+                    stringify!(#item_ident)
+                )
+                #(#field_fragments)*
+                .finish()
+            };
+            if is_struct {
+                quote! {
+                    let Self ( #(#field_idents),* ) = self;
+                    #fragment
+                }
+            } else {
+                quote! {
+                    Self::#item_ident ( #(#field_idents),* ) => {
+                        #fragment
+                    }
+                }
+            }
+        }
+        syn::Fields::Unit => {
+            let fragment = quote! {
+                f.debug_struct(
+                    stringify!(#item_ident)
+                )
+                .finish()
+            };
+            if is_struct {
+                quote! {
+                    #fragment
+                }
+            } else {
+                quote! {
+                    Self::#item_ident => {
+                        #fragment
+                    }
+                }
+            }
+        }
+    })
 }
 
 fn aggregate_format_rules(
@@ -455,15 +422,12 @@ fn field_attributes(
     fields: &syn::Fields,
     field_name: &HashMap<syn::Ident, Format>,
     field_type: &HashMap<syn::Type, Format>,
-    has_self: bool,
 ) -> Result<Vec<proc_macro2::TokenStream>, syn::Error> {
     fields
         .iter()
-        .map(|field| {
-            let Some(field_ident) = field.ident.as_ref() else {
-                return Err(syn::Error::new_spanned(field, "expected named field"));
-            };
-
+        .enumerate()
+        .map(|(field_nb, field)| {
+            let field_ident = &field.ident;
             // Get format from
             //     1. last attribute, or
             //     2. field name rule, or
@@ -476,41 +440,55 @@ fn field_attributes(
                 .find(|attr| attr.path().is_ident("debugify"))
                 .map(|attr| attr.parse_args::<Format>())
                 .transpose()?
-                .or_else(|| field_name.get(field_ident).cloned())
+                .or_else(|| {
+                    field_ident
+                        .as_ref()
+                        .and_then(|field_ident| field_name.get(field_ident).cloned())
+                })
                 .or_else(|| field_type.get(&field.ty).cloned());
 
-            Ok(debug_field(field_ident, format, has_self))
+            Ok(debug_field(
+                // Struct variants
+                field_ident
+                    .clone()
+                    // Tuple variants
+                    .unwrap_or_else(|| quote::format_ident!("field_{field_nb}")),
+                format,
+                field.ident.is_none(),
+            ))
         })
         .collect::<syn::Result<Vec<_>>>()
 }
 
 /// Generates the debug field call for a field
-fn debug_field(
-    field_ident: &syn::Ident,
+fn debug_field<T: ToTokens>(
+    field_ident: T,
     format: Option<Format>,
-    has_self: bool,
+    tuple: bool,
 ) -> proc_macro2::TokenStream {
-    let value = if has_self {
-        quote! { &self.#field_ident }
-    } else {
-        quote! { #field_ident }
-    };
-
     let value = match format {
         Some(Format::Function(format)) => quote! {
-            &std::format_args!("{}", #format(#value))
+            &std::format_args!("{}", #format(#field_ident))
         },
         Some(Format::String(format)) => quote! {
-            &std::format_args!(#format, #value)
+            &std::format_args!(#format, #field_ident)
         },
-        None => quote! { #value },
+        None => quote! { #field_ident },
     };
 
-    quote! {
-        .field(
-            stringify!(#field_ident),
-            #value
-        )
+    if tuple {
+        quote! {
+            .field(
+                #value
+            )
+        }
+    } else {
+        quote! {
+            .field(
+                stringify!(#field_ident),
+                #value
+            )
+        }
     }
 }
 
@@ -530,5 +508,70 @@ impl syn::parse::Parse for Format {
         } else {
             Err(lookahead.error())
         }
+    }
+}
+
+struct ItemAttributeMetaItem<T: Parse> {
+    values: ItemAttributeValues<T>,
+    _eq: syn::token::Eq,
+    format: Format,
+}
+
+impl<T: Parse> Parse for ItemAttributeMetaItem<T> {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            values: input.parse()?,
+            _eq: input.parse()?,
+            format: input.parse()?,
+        })
+    }
+}
+
+enum ItemAttributeValues<T: Parse> {
+    Single(ItemAttributeIdentsSingle<T>),
+    Multiple(ItemAttributeIdentsMultiple<T>),
+}
+
+impl<T: Parse> Parse for ItemAttributeValues<T> {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(syn::Ident) {
+            input
+                .parse::<ItemAttributeIdentsSingle<T>>()
+                .map(ItemAttributeValues::Single)
+        } else if lookahead.peek(syn::token::Bracket) {
+            input
+                .parse::<ItemAttributeIdentsMultiple<T>>()
+                .map(ItemAttributeValues::Multiple)
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+struct ItemAttributeIdentsSingle<T: Parse> {
+    value: T,
+}
+
+impl<T: Parse> Parse for ItemAttributeIdentsSingle<T> {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            value: input.parse()?,
+        })
+    }
+}
+
+struct ItemAttributeIdentsMultiple<T: Parse> {
+    _bracket: syn::token::Bracket,
+    values: syn::punctuated::Punctuated<T, syn::Token![,]>,
+}
+
+impl<T: Parse> Parse for ItemAttributeIdentsMultiple<T> {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        Ok(Self {
+            _bracket: syn::bracketed!(content in input),
+            values: content.parse_terminated(T::parse, syn::Token![,])?,
+        })
     }
 }
