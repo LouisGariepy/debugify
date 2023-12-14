@@ -369,41 +369,32 @@ fn aggregate_format_rules(
             HashMap::<syn::Ident, Format>::new(),
             HashMap::<syn::Type, Format>::new(),
         ),
-        |(mut field_names, mut field_types), attr| {
+        |(mut field_name_rules, mut field_type_rules), attr| {
             // If the attribute's path is not "debugify", don't aggregate it
             if !attr.path().is_ident("debugify") {
-                return syn::Result::Ok((field_names, field_types));
+                return syn::Result::Ok((field_name_rules, field_type_rules));
             };
 
             // Parse the attribute's content and append the rules to the maps
-            append_item_format_rules(attr, &mut field_names, &mut field_types)?;
+            attr.parse_nested_meta(|meta| {
+                let content;
+                syn::parenthesized!(content in meta.input);
+                if meta.path.is_ident("field_name") {
+                    insert_rules(content, &mut field_name_rules)?;
+                } else if meta.path.is_ident("field_type") {
+                    insert_rules(content, &mut field_type_rules)?;
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        meta.path,
+                        "expected `field_name` or `field_type`",
+                    ));
+                };
+                Ok(())
+            })?;
 
-            Ok((field_names, field_types))
+            Ok((field_name_rules, field_type_rules))
         },
     )
-}
-
-/// Parses the content of an item attribute and appends the rules to the maps
-fn append_item_format_rules(
-    attr: &syn::Attribute,
-    field_name: &mut HashMap<syn::Ident, Format>,
-    field_type: &mut HashMap<syn::Type, Format>,
-) -> syn::Result<()> {
-    attr.parse_nested_meta(|meta| {
-        let content;
-        syn::parenthesized!(content in meta.input);
-        if meta.path.is_ident("field_name") {
-            insert_rules(content, field_name)?;
-        } else if meta.path.is_ident("field_type") {
-            insert_rules(content, field_type)?;
-        } else {
-            return Err(syn::Error::new_spanned(
-                meta.path,
-                "expected `field_name` or `field_type`",
-            ));
-        };
-        Ok(())
-    })
 }
 
 /// Parses a comma separated list of rules and inserts them into the map
