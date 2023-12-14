@@ -39,8 +39,8 @@ use syn::{
 ///
 /// #[derive(Debugify)]
 /// #[debugify(field_name(
-///     [bar, biz] = "foobar{:?}",
-///     baz = "foobaz{:?}",
+///     [bar, biz] = "foobar{}",
+///     baz = "foobaz{}",
 /// ))]
 /// struct Foo {
 ///     bar: i32,
@@ -57,8 +57,8 @@ use syn::{
 ///     qux: 456,
 /// };
 ///
-/// let foo_debug = format!("{:?}", foo);
-/// assert_eq!(foo_debug, "Foo { bar: foobar123, baz: foobaz\"hello\", biz: foobar\"world\", qux: 456 }");
+/// let foo_debug = format!("{foo:?}");
+/// assert_eq!(foo_debug, "Foo { bar: foobar123, baz: foobazhello, biz: foobarworld, qux: 456 }");
 /// ```
 ///
 /// #### `field_type`
@@ -70,8 +70,8 @@ use syn::{
 ///
 /// #[derive(Debugify)]
 /// #[debugify(field_type(
-///     [i32, &'static str] = "foobar{:?}",
-///     String = "foobaz{:?}",
+///     [i32, &'static str] = "foobar{}",
+///     String = "foobaz{}",
 /// ))]
 /// struct Foo {
 ///     bar: i32,
@@ -87,8 +87,8 @@ use syn::{
 ///     qux: 456,
 /// };
 ///
-/// let foo_debug = format!("{:?}", foo);
-/// assert_eq!(foo_debug, "Foo { bar: foobar123, baz: foobaz\"hello\", biz: foobar\"world\", qux: 456 }");
+/// let foo_debug = format!("{foo:?}");
+/// assert_eq!(foo_debug, "Foo { bar: foobar123, baz: foobazhello, biz: foobarworld, qux: 456 }");
 /// ```
 ///
 /// ### Field attributes
@@ -99,9 +99,9 @@ use syn::{
 /// use debugify::Debugify;
 ///
 /// #[derive(Debugify)]
-/// #[debugify(field_name(bar = "foo{:?}"))]
+/// #[debugify(field_name(bar = "foo{}"))]
 /// struct Foo {
-///     #[debugify("bar{:?}")]
+///     #[debugify("bar{}")]
 ///     bar: i32,
 ///     baz: String,
 /// }
@@ -111,7 +111,7 @@ use syn::{
 ///     baz: "hello".to_string(),
 /// };
 ///
-/// let foo_debug = format!("{:?}", foo);
+/// let foo_debug = format!("{foo:?}");
 /// assert_eq!(foo_debug, "Foo { bar: bar123, baz: \"hello\" }");
 /// ```
 ///
@@ -126,7 +126,7 @@ use syn::{
 /// use debugify::Debugify;
 ///
 /// #[derive(Debugify)]
-/// #[debugify(field_name([biz, qux] = "foo{:?}"))]
+/// #[debugify(field_name([biz, qux] = "foo{}"))]
 /// enum Foo {
 ///     Bar {
 ///         biz: i32,
@@ -134,7 +134,7 @@ use syn::{
 ///     },
 ///     Baz {
 ///         biz: i32,
-///         #[debugify("qux{:?}")]
+///         #[debugify("qux{}")]
 ///         qux: String,
 ///         quant: i64,
 ///     }
@@ -150,15 +150,34 @@ use syn::{
 ///     quant: 789,
 /// };
 ///
-/// let foo_1_debug = format!("{:?}", foo_1);
-/// assert_eq!(foo_1_debug, "Bar { biz: foo123, qux: foo\"hello\" }");
+/// let foo_1_debug = format!("{foo_1:?}");
+/// assert_eq!(foo_1_debug, "Bar { biz: foo123, qux: foohello }");
 ///
-/// let foo_2_debug = format!("{:?}", foo_2);
-/// assert_eq!(foo_2_debug, "Baz { biz: foo456, qux: qux\"world\", quant: 789 }");
+/// let foo_2_debug = format!("{foo_2:?}");
+/// assert_eq!(foo_2_debug, "Baz { biz: foo456, qux: quxworld, quant: 789 }");
 /// ```
 ///
-/// Tuple and unit variants are essentially ignored by `debugify`. They will be debug-printed as they normally would.
-
+/// ## Tuple and unit structs and variants
+/// Tuple structs and variants also support field format attributes. Of course, these don't interact at all with the field name rules.
+///
+/// Unit structs and variants are formatted as normal.
+///
+/// ```rust
+/// use debugify::Debugify;
+///
+/// #[derive(Debugify)]
+/// #[debugify(field_type(String = "foo{}"))]
+/// struct Foo(
+///     #[debugify("number{}")]
+///     i32,
+///     String,
+///     i32
+/// );
+///
+/// let foo = Foo(64, "bar".into(), 128);
+/// let foo_debug = format!("{foo:?}");
+/// assert_eq!(foo_debug, "Foo(number64, foobar, 128)")
+/// ```
 #[proc_macro_derive(Debugify, attributes(debugify))]
 pub fn debugify(tokens: TokenStream) -> TokenStream {
     let item = syn::parse_macro_input!(tokens as syn::Item);
