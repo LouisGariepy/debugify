@@ -1,0 +1,22 @@
+[package]
+name = "debugify"
+version = "0.1.0"
+edition = "2021"
+description = "A super simple character cursor implementation geared towards lexers/tokenizers."
+license = "MIT/Apache-2.0"
+repository = "https://github.com/LouisGariepy/debugify"
+keywords = ["debug", "derive", "proc-macro", "formatting"]
+categories = ["development-tools", "macros", "value-formatting"]
+
+[lib]
+proc-macro = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+
+syn = { version = "2.0.40", features = ["full", "extra-traits"] }
+quote = "1.0.33"
+serde = { version = "1.0", features = ["derive"] }
+proc-macro2 = "1.0.27"
