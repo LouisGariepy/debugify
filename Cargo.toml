@@ -6,7 +6,7 @@ description = "Derive macro for `std::fmt::Debug` focused on reducing boilerplat
 license = "MIT/Apache-2.0"
 repository = "https://github.com/LouisGariepy/debugify"
 keywords = ["debug", "derive", "proc-macro", "formatting"]
-categories = ["development-tools", "macros", "value-formatting"]
+categories = ["development-tools", "value-formatting"]
 
 [lib]
 proc-macro = true
